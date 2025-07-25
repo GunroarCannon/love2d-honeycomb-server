@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: honeycomb-game-backend
+    runtime: node
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      - key: SOLANA_RPC
+        value: https://api.devnet.solana.com
+      - key: HONEYCOMB_API_URL
+        value: https://edge.main.honeycombprotocol.com/
+      - key: TREASURER_PRIVATE_KEY
+        fromDatabase: false
+        

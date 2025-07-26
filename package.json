@@ -10,7 +10,8 @@
     "test": "jest"
   },
   "dependencies": {
-    "@honeycomb-protocol/edge-client": "github:honeycomb-protocol/client",
+    "@honeycomb-protocol/edge-client": "^0.0.7-beta.14",
+    "@honeycomb-protocol/hive-control": "^0.2.19-beta.33",
     "@solana/web3.js": "^1.84.0",
     "bs58": "^5.0.0",
     "cors": "^2.8.5",

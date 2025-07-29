@@ -45,10 +45,13 @@ const challengeStore = {
 
 // === HONEYCOMB PROJECT ===
 let honeycombProject; // Will store our project ID
-
 async function initializeProject() {
   try {
-    const { project, tx } = await honeycombClient.createCreateProjectTransaction({
+    console.log("Initializing Honeycomb project...");
+    console.log("Treasurer PublicKey:", treasurerWallet.publicKey.toString());
+    
+    // 1. Create project transaction
+    const { project, tx: createTx } = await honeycombClient.createCreateProjectTransaction({
       name: "DailyChallengesGame",
       authority: treasurerWallet.publicKey,
       profileDataConfig: {
@@ -57,17 +60,40 @@ async function initializeProject() {
       }
     });
 
-    await sendAndConfirmTransaction(connection, tx, [treasurerWallet]);
+    // 2. Add recent blockhash (critical fix)
+    const { blockhash } = await connection.getLatestBlockhash();
+    createTx.recentBlockhash = blockhash;
+    createTx.feePayer = treasurerWallet.publicKey;
+
+    // 3. Sign and send
+    console.log("Sending transaction...");
+    const signature = await sendAndConfirmTransaction(
+      connection,
+      createTx,
+      [treasurerWallet],
+      { commitment: 'confirmed' }
+    );
+
     honeycombProject = project;
-    console.log("Honeycomb Project Created:", project.toString());
+    console.log("✅ Project Created:", {
+      projectId: project.toString(),
+      txSignature: signature,
+      explorerUrl: `https://explorer.solana.com/tx/${signature}?cluster=devnet`
+    });
+    
   } catch (err) {
+    console.error("❌ Project initialization failed:", {
+      error: err.message,
+      stack: err.stack
+    });
+    
+    // Special handling for existing projects
     if (err.message.includes("Project already exists")) {
-      console.log("Using existing project");
-      // Add logic here to fetch existing project if needed
-    } else {
-      console.error("Project initialization failed:", err);
-      throw err;
+      console.log("⚠️ Project exists - fetching details...");
+      honeycombProject = await getExistingProject();
+      return;
     }
+    throw err; // Re-throw other errors
   }
 }
 

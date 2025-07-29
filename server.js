@@ -43,6 +43,13 @@ const challengeStore = {
   playerProgress: {}
 };
 
+console.log("Environment Verification:", {
+  rpcEndpoint: connection.rpcEndpoint,
+  honeycombUrl: process.env.HONEYCOMB_API_URL,
+  treasurerPubkey: treasurerWallet.publicKey.toString(),
+  privateKeyFormat: Array.isArray(JSON.parse(process.env.TREASURER_PRIVATE_KEY))
+});
+
 // === HONEYCOMB PROJECT ===
 let honeycombProject; // Will store our project ID
 async function initializeProject() {

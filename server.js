@@ -21,7 +21,19 @@ const honeycombClient = createEdgeClient(
   process.env.HONEYCOMB_API_URL || 'https://edge.main.honeycombprotocol.com/',
   true // enable logging
 );
+// Verify Honeycomb client is properly initialized
+console.log("Honeycomb client verification:", {
+  apiUrl: honeycombClient.apiUrl,
+  network: honeycombClient.network,
+  connected: !!honeycombClient.connection
+});
 
+// Verify treasury wallet
+console.log("Treasury wallet verification:", {
+  publicKey: treasurerWallet.publicKey.toString(),
+  isSigner: await treasurerWallet.publicKey.isSigner,
+  balance: await connection.getBalance(treasurerWallet.publicKey) / LAMPORTS_PER_SOL + " SOL"
+});
 // Solana connection
 const connection = new Connection(
   process.env.SOLANA_RPC || 'https://api.devnet.solana.com',
@@ -55,38 +67,55 @@ let honeycombProject; // Will store our project ID
 async function initializeProject() {
   try {
     console.log("Initializing Honeycomb project...");
-    console.log("Treasurer PublicKey:", treasurerWallet.publicKey.toString());
     
-    // 1. Create project transaction
-    const { project, tx: createTx } = await honeycombClient.createCreateProjectTransaction({
+    // 1. Verify Honeycomb client connection
+    const honeycombStatus = await honeycombClient.getHealth();
+    console.log("Honeycomb client status:", honeycombStatus);
+
+    // 2. Create project with explicit parameters
+    const projectConfig = {
       name: "DailyChallengesGame",
-      authority: treasurerWallet.publicKey,
+      authority: treasurerWallet.publicKey.toString(),
+      payer: treasurerWallet.publicKey.toString(),
       profileDataConfig: {
         achievements: ["DailyWinner", "WeekStreak"],
         customDataFields: ["TotalPoints", "LastPlayed"]
       }
-    });
+    };
 
-    // 2. Add recent blockhash (critical fix)
+    console.log("Creating project with config:", projectConfig);
+    
+    // 3. Create and prepare transaction
+    const { project, tx } = await honeycombClient.createCreateProjectTransaction(projectConfig);
+    
+    if (!tx) {
+      throw new Error("Transaction creation failed - check Honeycomb client configuration");
+    }
+
+    // 4. Get recent blockhash
     const { blockhash } = await connection.getLatestBlockhash();
-    createTx.recentBlockhash = blockhash;
-    createTx.feePayer = treasurerWallet.publicKey;
+    
+    // 5. Build complete transaction
+    const transaction = new Transaction({
+      feePayer: treasurerWallet.publicKey,
+      recentBlockhash: blockhash,
+    }).add(tx);
 
-    // 3. Sign and send
+    // 6. Sign and send
     console.log("Sending transaction...");
     const signature = await sendAndConfirmTransaction(
       connection,
-      createTx,
+      transaction,
       [treasurerWallet],
-      { commitment: 'confirmed' }
+      { skipPreflight: true, commitment: 'confirmed' }
     );
 
     honeycombProject = project;
-    console.log("✅ Project Created:", {
-      projectId: project.toString(),
-      txSignature: signature,
-      explorerUrl: `https://explorer.solana.com/tx/${signature}?cluster=devnet`
-    });
+    console.log("✅ Project created successfully!");
+    console.log(`Project ID: ${project.toString()}`);
+    console.log(`Transaction: https://explorer.solana.com/tx/${signature}?cluster=devnet`);
+
+    return project;
     
   } catch (err) {
     console.error("❌ Project initialization failed:", {
@@ -94,16 +123,15 @@ async function initializeProject() {
       stack: err.stack
     });
     
-    // Special handling for existing projects
     if (err.message.includes("Project already exists")) {
-      console.log("⚠️ Project exists - fetching details...");
+      console.log("Project exists - fetching details...");
       honeycombProject = await getExistingProject();
-      return;
+      return honeycombProject;
     }
-    throw err; // Re-throw other errors
+    
+    throw err;
   }
 }
-
 // === GAME LOGIC ===
 function generateDailyChallenges() {
   const verbs = ['Defeat', 'Collect', 'Complete'];

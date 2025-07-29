@@ -9,7 +9,8 @@ const {
   PublicKey,
   Transaction,
   SystemProgram,
-  sendAndConfirmTransaction
+  sendAndConfirmTransaction,
+  LAMPORTS_PER_SOL
 } = require('@solana/web3.js');
 
 const app = express();
@@ -27,7 +28,7 @@ const connection = new Connection(
   'confirmed'
 );
 
-// Treasury wallet
+// Treasury wallet (using JSON array from ENV)
 const treasurerWallet = Keypair.fromSecretKey(
   new Uint8Array(JSON.parse(process.env.TREASURER_PRIVATE_KEY))
 );
@@ -35,69 +36,57 @@ const treasurerWallet = Keypair.fromSecretKey(
 app.use(cors());
 app.use(express.json());
 
-// === IN-MEMORY STORE ===
+// === GAME STATE ===
 const challengeStore = {
   currentDate: '',
   challenges: [],
-  playerProgress: {} // { wallet: { challengeId: progress } }
+  playerProgress: {}
 };
 
-// === HONEYCOMB PROJECT CONFIG ===
-const PROJECT_CONFIG = {
-  name: "DailyChallengesGame",
-  achievements: ["ChallengeMaster", "DailyPlayer", "WeekStreak"],
-  customFields: ["TotalPoints", "LastPlayed", "ChallengeStreak"]
-};
+// === HONEYCOMB PROJECT ===
+let honeycombProject; // Will store our project ID
 
-// === INITIALIZE PROJECT ===
-async function initializeHoneycombProject() {
+async function initializeProject() {
   try {
-    const { tx } = await honeycombClient.createCreateProjectTransaction({
-      name: PROJECT_CONFIG.name,
+    const { project, tx } = await honeycombClient.createCreateProjectTransaction({
+      name: "DailyChallengesGame",
       authority: treasurerWallet.publicKey,
       profileDataConfig: {
-        achievements: PROJECT_CONFIG.achievements,
-        customDataFields: PROJECT_CONFIG.customFields
+        achievements: ["DailyWinner", "WeekStreak"],
+        customDataFields: ["TotalPoints", "LastPlayed"]
       }
     });
-    
-    const signature = await sendAndConfirmTransaction(
-      connection,
-      tx,
-      [treasurerWallet]
-    );
-    
-    console.log("Project initialized:", signature);
+
+    await sendAndConfirmTransaction(connection, tx, [treasurerWallet]);
+    honeycombProject = project;
+    console.log("Honeycomb Project Created:", project.toString());
   } catch (err) {
-    console.error("Project initialization failed:", err);
+    if (err.message.includes("Project already exists")) {
+      console.log("Using existing project");
+      // Add logic here to fetch existing project if needed
+    } else {
+      console.error("Project initialization failed:", err);
+      throw err;
+    }
   }
 }
 
-// === GENERATE DAILY CHALLENGES ===
+// === GAME LOGIC ===
 function generateDailyChallenges() {
-  const verbs = ['Defeat', 'Collect', 'Survive', 'Complete'];
-  const targets = ['enemies', 'coins', 'minutes', 'levels'];
+  const verbs = ['Defeat', 'Collect', 'Complete'];
+  const targets = ['enemies', 'coins', 'levels'];
   
-  return Array.from({ length: 3 }, (_, i) => {
-    const verb = verbs[Math.floor(Math.random() * verbs.length)];
-    const target = targets[Math.floor(Math.random() * targets.length)];
-    const amount = Math.floor(Math.random() * 5) + 3; // 3-7
-    const reward = amount * 10; // 10 points per unit
-    
-    return {
-      id: `daily_${Date.now()}_${i}`,
-      verb,
-      target,
-      amount,
-      reward,
-      badgeIndex: i // Maps to Honeycomb badge
-    };
-  });
+  return Array.from({ length: 3 }, (_, i) => ({
+    id: `daily_${Date.now()}_${i}`,
+    verb: verbs[Math.floor(Math.random() * verbs.length)],
+    target: targets[Math.floor(Math.random() * targets.length)],
+    amount: Math.floor(Math.random() * 5) + 3,
+    reward: (Math.floor(Math.random() * 5) + 3) * 10,
+    badgeIndex: i
+  }));
 }
 
 // === ROUTES ===
-
-// Get today's challenges
 app.get('/challenges', async (req, res) => {
   const today = new Date().toDateString();
   
@@ -105,40 +94,29 @@ app.get('/challenges', async (req, res) => {
     challengeStore.currentDate = today;
     challengeStore.challenges = generateDailyChallenges();
     challengeStore.playerProgress = {};
-    
-    // Create Honeycomb badges for new challenges
-    await createHoneycombBadges(challengeStore.challenges);
   }
   
   res.json(challengeStore.challenges);
 });
 
-// Connect wallet
 app.post('/connect', async (req, res) => {
   const { walletAddress } = req.body;
   
   try {
-    // Verify wallet exists on chain
     const pubkey = new PublicKey(walletAddress);
     const accountInfo = await connection.getAccountInfo(pubkey);
     if (!accountInfo) throw new Error('Wallet not found');
     
-    // Initialize or load player profile
-    const profile = await getOrCreateProfile(walletAddress);
-    
     res.json({
       wallet: walletAddress,
       challenges: challengeStore.challenges,
-      progress: challengeStore.playerProgress[walletAddress] || {},
-      profile
+      progress: challengeStore.playerProgress[walletAddress] || {}
     });
-    
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
 });
 
-// Update challenge progress
 app.post('/progress', async (req, res) => {
   const { walletAddress, challengeId, progress } = req.body;
   
@@ -146,7 +124,6 @@ app.post('/progress', async (req, res) => {
     const challenge = challengeStore.challenges.find(c => c.id === challengeId);
     if (!challenge) throw new Error('Challenge not found');
     
-    // Initialize progress tracking
     if (!challengeStore.playerProgress[walletAddress]) {
       challengeStore.playerProgress[walletAddress] = {};
     }
@@ -156,156 +133,27 @@ app.post('/progress', async (req, res) => {
       claimed: false
     };
     
-    // Update progress
     playerProgress.completed += progress;
     
-    // Check for completion
     if (playerProgress.completed >= challenge.amount && !playerProgress.claimed) {
-      // Award Honeycomb badge
-      await awardBadge(walletAddress, challenge.badgeIndex);
-      
-      // Update player stats
-      await updatePlayerStats(walletAddress, challenge.reward);
-      
+      // Reward logic here
       playerProgress.claimed = true;
     }
     
-    challengeStore.playerProgress[walletAddress][challengeId] = playerProgress;
-    
-    res.json({ 
-      progress: playerProgress,
-      completed: playerProgress.completed >= challenge.amount
-    });
-    
+    res.json({ progress: playerProgress });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
 });
-
-// Claim rewards
-app.post('/claim', async (req, res) => {
-  const { walletAddress } = req.body;
-  
-  try {
-    // Verify completed challenges
-    const completions = Object.entries(challengeStore.playerProgress[walletAddress] || {})
-      .filter(([_, progress]) => progress.completed && !progress.claimed);
-    
-    if (completions.length === 0) {
-      throw new Error('No rewards to claim');
-    }
-    
-    // Calculate total reward
-    const totalReward = completions.reduce((sum, [challengeId, _]) => {
-      const challenge = challengeStore.challenges.find(c => c.id === challengeId);
-      return sum + (challenge?.reward || 0);
-    }, 0);
-    
-    // Distribute rewards
-    await distributeRewards(walletAddress, totalReward);
-    
-    // Mark as claimed
-    completions.forEach(([challengeId, _]) => {
-      challengeStore.playerProgress[walletAddress][challengeId].claimed = true;
-    });
-    
-    res.json({ 
-      success: true,
-      reward: totalReward 
-    });
-    
-  } catch (err) {
-    res.status(400).json({ error: err.message });
-  }
-});
-
-// === HONEYCOMB HELPERS ===
-
-async function getOrCreateProfile(walletAddress) {
-  try {
-    // Check for existing profile
-    const profile = await honeycombClient.getProfile({
-      project: process.env.HONEYCOMB_PROJECT_ID,
-      wallet: walletAddress
-    });
-    
-    return profile;
-  } catch {
-    // Create new profile
-    const { tx } = await honeycombClient.createCreateProfileTransaction({
-      project: process.env.HONEYCOMB_PROJECT_ID,
-      wallet: walletAddress
-    });
-    
-    await sendAndConfirmTransaction(connection, tx, [treasurerWallet]);
-    return await honeycombClient.getProfile({
-      project: process.env.HONEYCOMB_PROJECT_ID,
-      wallet: walletAddress
-    });
-  }
-}
-
-async function createHoneycombBadges(challenges) {
-  for (const challenge of challenges) {
-    await honeycombClient.createCreateBadgeCriteriaTransaction({
-      badgeIndex: challenge.badgeIndex,
-      condition: "Public",
-      startTime: Math.floor(Date.now() / 1000),
-      endTime: Math.floor(Date.now() / 1000) + 86400 // 24 hours
-    });
-  }
-}
-
-async function awardBadge(walletAddress, badgeIndex) {
-  await honeycombClient.createClaimBadgeCriteriaTransaction({
-    profileAddress: walletAddress,
-    criteriaIndex: badgeIndex,
-    proof: "Public"
-  });
-}
-
-async function updatePlayerStats(walletAddress, points) {
-  await honeycombClient.createSetCustomDataTransaction({
-    wallet: walletAddress,
-    customData: {
-      TotalPoints: { $inc: points },
-      LastPlayed: new Date().toISOString(),
-      ChallengeStreak: { $inc: 1 }
-    }
-  });
-}
-
-async function distributeRewards(walletAddress, amount) {
-  // On-chain transfer
-  const tx = new Transaction().add(
-    SystemProgram.transfer({
-      fromPubkey: treasurerWallet.publicKey,
-      toPubkey: new PublicKey(walletAddress),
-      lamports: Math.floor(amount * LAMPORTS_PER_SOL * 0.001) // Scale for devnet
-    })
-  );
-  
-  await sendAndConfirmTransaction(connection, tx, [treasurerWallet]);
-  
-  // Update Honeycomb profile
-  await honeycombClient.createSetAchievementTransaction({
-    wallet: walletAddress,
-    achievement: "DailyPlayer",
-    achieved: true
-  });
-}
 
 // === START SERVER ===
 app.listen(PORT, async () => {
-  console.log(`Server running on http://localhost:${PORT}`);
+  console.log(`Initializing server...`);
   
-  // Initialize Honeycomb project on startup
-  await initializeHoneycombProject();
-  
-  // Generate first set of challenges
-  challengeStore.currentDate = new Date().toDateString();
+  await initializeProject();
   challengeStore.challenges = generateDailyChallenges();
-  await createHoneycombBadges(challengeStore.challenges);
   
-  console.log('Daily challenges ready:', challengeStore.challenges);
+  console.log(`Server running on http://localhost:${PORT}`);
+  console.log(`Treasurer: ${treasurerWallet.publicKey.toString()}`);
+  console.log(`Project: ${honeycombProject?.toString() || 'Not created'}`);
 });

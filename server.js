@@ -28,12 +28,6 @@ console.log("Honeycomb client verification:", {
   connected: !!honeycombClient.connection
 });
 
-// Verify treasury wallet
-console.log("Treasury wallet verification:", {
-  publicKey: treasurerWallet.publicKey.toString(),
-  isSigner: await treasurerWallet.publicKey.isSigner,
-  balance: await connection.getBalance(treasurerWallet.publicKey) / LAMPORTS_PER_SOL + " SOL"
-});
 // Solana connection
 const connection = new Connection(
   process.env.SOLANA_RPC || 'https://api.devnet.solana.com',
@@ -45,6 +39,12 @@ const treasurerWallet = Keypair.fromSecretKey(
   new Uint8Array(JSON.parse(process.env.TREASURER_PRIVATE_KEY))
 );
 
+// Verify treasury wallet
+console.log("Treasury wallet verification:", {
+  publicKey: treasurerWallet.publicKey.toString(),
+  isSigner: await treasurerWallet.publicKey.isSigner,
+  balance: await connection.getBalance(treasurerWallet.publicKey) / LAMPORTS_PER_SOL + " SOL"
+});
 app.use(cors());
 app.use(express.json());
 

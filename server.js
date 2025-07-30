@@ -69,8 +69,8 @@ console.log("Treasury wallet verification:", {
   balance: await connection.getBalance(treasurerWallet.publicKey) / LAMPORTS_PER_SOL + " SOL"
 });
     // 1. Verify Honeycomb client connection
-    const honeycombStatus = await honeycombClient.getHealth();
-    console.log("Honeycomb client status:", honeycombStatus);
+  //  const honeycombStatus = await honeycombClient.getHealth();
+    //console.log("Honeycomb client status:", honeycombStatus);
 
     // 2. Create project with explicit parameters
     const projectConfig = {

@@ -39,12 +39,6 @@ const treasurerWallet = Keypair.fromSecretKey(
   new Uint8Array(JSON.parse(process.env.TREASURER_PRIVATE_KEY))
 );
 
-// Verify treasury wallet
-console.log("Treasury wallet verification:", {
-  publicKey: treasurerWallet.publicKey.toString(),
-  isSigner: await treasurerWallet.publicKey.isSigner,
-  balance: await connection.getBalance(treasurerWallet.publicKey) / LAMPORTS_PER_SOL + " SOL"
-});
 app.use(cors());
 app.use(express.json());
 
@@ -68,6 +62,12 @@ async function initializeProject() {
   try {
     console.log("Initializing Honeycomb project...");
     
+// Verify treasury wallet
+console.log("Treasury wallet verification:", {
+  publicKey: treasurerWallet.publicKey.toString(),
+  isSigner: await treasurerWallet.publicKey.isSigner,
+  balance: await connection.getBalance(treasurerWallet.publicKey) / LAMPORTS_PER_SOL + " SOL"
+});
     // 1. Verify Honeycomb client connection
     const honeycombStatus = await honeycombClient.getHealth();
     console.log("Honeycomb client status:", honeycombStatus);

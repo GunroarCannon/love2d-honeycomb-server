@@ -52,11 +52,6 @@ console.log("Honeycomb client verification:", {
   connected: !!honeycombClient.connection
 });
 
-// Solana connection
-const connection = new Connection(
-  process.env.SOLANA_RPC || 'https://api.devnet.solana.com',
-  'confirmed'
-);
 
 // Treasury wallet (using JSON array from ENV)
 const treasurerWallet = Keypair.fromSecretKey(

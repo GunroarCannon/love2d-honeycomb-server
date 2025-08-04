@@ -16,10 +16,34 @@ const {
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Initialize Honeycomb client
+const {
+  HONEYCOMB_API_URL,
+  SOLANA_RPC,
+  TREASURER_PRIVATE_KEY 
+} = process.env;
+
+// Network configuration (ADD THIS)
+const HONEYCOMB_NETWORKS = {
+  mainnet: 'https://rpc.main.honeycombprotocol.com',
+  testnet: 'https://rpc.test.honeycombprotocol.com',
+  // Optional: Add Solana clusters if needed
+  solanaDevnet: 'https://api.devnet.solana.com'
+};
+
+// Initialize connection (MODIFY THIS)
+const connection = new Connection(
+  SOLANA_RPC || HONEYCOMB_NETWORKS.testnet, // Falls back to Honeycomb testnet
+  'confirmed'
+);
+
+// Initialize Honeycomb client (MODIFY THIS)
 const honeycombClient = createEdgeClient(
-  process.env.HONEYCOMB_API_URL || 'https://edge.main.honeycombprotocol.com/',
-  true // enable logging
+  HONEYCOMB_API_URL || 'https://edge.main.honeycombprotocol.com/',
+  {
+    connection, // Pass the Solana connection
+    network: HONEYCOMB_NETWORKS.testnet, // Explicitly set network
+    debug: true
+  }
 );
 // Verify Honeycomb client is properly initialized
 console.log("Honeycomb client verification:", {
@@ -41,6 +65,10 @@ const treasurerWallet = Keypair.fromSecretKey(
 
 app.use(cors());
 app.use(express.json());
+
+console.log("Treasurer balance:", 
+  await connection.getBalance(treasurerWallet.publicKey) / LAMPORTS_PER_SOL
+);
 
 // === GAME STATE ===
 const challengeStore = {

@@ -1,41 +1,3 @@
-
-Hi Claude! Could you debug my code and give me tips? If you need more information from me, ask me 1-2 key questions right away. If you think I should upload any documents that would help you do a better job, let me know. You can use the tools you have access to — like Google Drive, web search, etc. — if they’ll help you better accomplish this task. Do not use analysis tool. Please keep your responses friendly, brief and conversational. 
-
-Please execute the task as soon as you can - an artifact would be great if it makes sense. If using an artifact, consider what kind of artifact (interactive, visual, checklist, etc.) might be most helpful for this specific task. Thanks for your help!
-
-Hi! I'd be happy to help debug your code and give you some tips.
-
-To get started, I need to see what we're working with:
-
-What programming language and type of code are you working with? (Python script, JavaScript app, HTML/CSS, etc.)
-What specific issue are you encountering? (Error messages, unexpected behavior, performance problems, etc.)
-Feel free to paste your code directly in the chat, or if you have files, you can upload them and I'll read them using the file access tools. Once I can see the code and understand the problem, I can create an interactive debugging artifact to help walk through the issues and solutions!
-
-What've you got for me? 🚀
-
-
-
-
-
-// === ENV + SETUP === require('dotenv').config(); const express = require('express'); const cors = require('cors'); const { createEdgeClient } = require('@honeycomb-protocol/edge-client'); const { Connection, Keypair, PublicKey, Transaction, SystemProgram, sendAndConfirmTrans
-
-pasted
-
-Looking at your code and error logs, I can see the main issue! The Honeycomb client isn't initializing properly - notice in the logs that apiUrl, network, and connected are all undefined/false.
-
-Here are the key problems I spotted:
-
-Honeycomb client initialization is failing - the client verification shows everything as undefined
-Missing error handling for the Honeycomb client setup
-Incomplete getExistingProject() function that's referenced but not defined
-Let me create a debugged version with fixes and better error handling:
-
-
-Fixed Honeycomb Server
-Code 
-
-
-
 // === ENV + SETUP ===
 require('dotenv').config();
 const express = require('express');
@@ -315,5 +277,101 @@ app.post('/connect', async (req, res) => {
     });
   } catch (err) {
     console.error("Error in /connect:", err);
-    res.status(400).json({ error: err.me
+    res.status(400).json({ error: err.message });
+  }
+});
 
+app.post('/progress', async (req, res) => {
+  const { walletAddress, challengeId, progress } = req.body;
+  
+  try {
+    if (!walletAddress || !challengeId || progress === undefined) {
+      return res.status(400).json({ error: "Missing required fields" });
+    }
+
+    const challenge = challengeStore.challenges.find(c => c.id === challengeId);
+    if (!challenge) {
+      return res.status(404).json({ error: 'Challenge not found' });
+    }
+    
+    if (!challengeStore.playerProgress[walletAddress]) {
+      challengeStore.playerProgress[walletAddress] = {};
+    }
+    
+    const playerProgress = challengeStore.playerProgress[walletAddress][challengeId] || {
+      completed: 0,
+      claimed: false
+    };
+    
+    playerProgress.completed = Math.min(playerProgress.completed + progress, challenge.amount);
+    challengeStore.playerProgress[walletAddress][challengeId] = playerProgress;
+    
+    if (playerProgress.completed >= challenge.amount && !playerProgress.claimed) {
+      console.log(`Player ${walletAddress} completed challenge ${challengeId}`);
+      playerProgress.claimed = true;
+    }
+    
+    res.json({ progress: playerProgress });
+  } catch (err) {
+    console.error("Error in /progress:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Health check endpoint
+app.get('/health', (req, res) => {
+  res.json({
+    status: 'ok',
+    honeycombProject: honeycombProject?.toString() || 'not initialized',
+    challenges: challengeStore.challenges.length,
+    timestamp: new Date().toISOString()
+  });
+});
+
+// === GRACEFUL STARTUP ===
+async function startServer() {
+  try {
+    console.log("🚀 Starting server initialization...");
+    
+    // Initialize Honeycomb client first
+    initializeHoneycombClient();
+    
+    // Try to initialize project (non-blocking)
+    try {
+      await initializeProject();
+    } catch (error) {
+      console.error("⚠️ Project initialization failed, but server will continue:", error.message);
+      // Server can still run for basic functionality
+    }
+    
+    // Generate initial challenges
+    challengeStore.challenges = generateDailyChallenges();
+    
+    // Start server
+    app.listen(PORT, () => {
+      console.log("✅ Server running successfully!");
+      console.log(`🌐 URL: http://localhost:${PORT}`);
+      console.log(`💰 Treasurer: ${treasurerWallet.publicKey.toString()}`);
+      console.log(`🎯 Project: ${honeycombProject?.toString() || 'Not initialized'}`);
+      console.log(`📊 Challenges: ${challengeStore.challenges.length} generated`);
+    });
+    
+  } catch (error) {
+    console.error("❌ Server startup failed:", error);
+    process.exit(1);
+  }
+}
+
+// Handle uncaught exceptions
+process.on('uncaughtException', (error) => {
+  console.error('Uncaught Exception:', error);
+  process.exit(1);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+  process.exit(1);
+});
+
+// Start the server
+startServer();

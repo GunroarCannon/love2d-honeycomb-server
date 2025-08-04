@@ -1,5 +1,7 @@
 // === ENV + SETUP ===
 require('dotenv').config();
+console.log("[INIT] Environment variables loaded");
+
 const express = require('express');
 const cors = require('cors');
 const { createEdgeClient } = require('@honeycomb-protocol/edge-client');
@@ -8,78 +10,72 @@ const {
   Keypair,
   PublicKey,
   Transaction,
-  SystemProgram,
   sendAndConfirmTransaction,
   LAMPORTS_PER_SOL
 } = require('@solana/web3.js');
 
+console.log("[INIT] Dependencies loaded");
+
 const app = express();
 const PORT = process.env.PORT || 3000;
+console.log(`[CONFIG] Server port set to: ${PORT}`);
 
-// === ENHANCED CLIENT INITIALIZATION ===
-let honeycombClient;
+// Network configuration
+const HONEYCOMB_NETWORKS = {
+  mainnet: 'https://rpc.main.honeycombprotocol.com',
+  testnet: 'https://rpc.test.honeycombprotocol.com',
+  solanaDevnet: 'https://api.devnet.solana.com'
+};
+console.log("[CONFIG] Network endpoints configured");
 
-function initializeHoneycombClient() {
-  try {
-    const apiUrl = process.env.HONEYCOMB_API_URL || 'https://edge.main.honeycombprotocol.com/';
-    console.log("Initializing Honeycomb client with URL:", apiUrl);
-    
-    honeycombClient = createEdgeClient(apiUrl, true);
-    
-    // Enhanced verification
-    console.log("Honeycomb client verification:", {
-      apiUrl: honeycombClient?.apiUrl || 'undefined',
-      network: honeycombClient?.network || 'undefined', 
-      connected: !!honeycombClient?.connection,
-      clientExists: !!honeycombClient
-    });
-    
-    if (!honeycombClient) {
-      throw new Error("Failed to create Honeycomb client - client is null/undefined");
-    }
-    
-    return honeycombClient;
-    
-  } catch (error) {
-    console.error("❌ Honeycomb client initialization failed:", error);
-    throw error;
-  }
-}
+// Initialize connections with debug logs
+console.log("[NETWORK] Initializing Solana connection...");
+const connection = new Connection(
+  process.env.SOLANA_RPC || HONEYCOMB_NETWORKS.testnet,
+  'confirmed'
+);
+console.log(`[NETWORK] Solana RPC connected to: ${connection.rpcEndpoint}`);
 
-// Solana connection with better error handling
-let connection;
-try {
-  connection = new Connection(
-    process.env.SOLANA_RPC || 'https://api.devnet.solana.com',
-    'confirmed'
-  );
-  console.log("✅ Solana connection established:", connection.rpcEndpoint);
-} catch (error) {
-  console.error("❌ Solana connection failed:", error);
-  process.exit(1);
-}
+console.log("[NETWORK] Initializing Honeycomb client...");
+const honeycombClient = createEdgeClient({
+  apiUrl: process.env.HONEYCOMB_API_URL || 'https://edge.main.honeycombprotocol.com/',
+  connection: connection,
+  network: 'testnet',
+  debug: true
+});
 
-// Treasury wallet with validation
+// Verify client initialization
+console.log("[DEBUG] Honeycomb client verification:", {
+  apiUrl: honeycombClient.apiUrl,
+  network: honeycombClient.network,
+  connectionValid: !!honeycombClient.connection,
+  connectionEndpoint: honeycombClient.connection?.rpcEndpoint
+});
+
+// Treasury wallet setup with validation
+console.log("[WALLET] Initializing treasurer wallet...");
 let treasurerWallet;
 try {
-  if (!process.env.TREASURER_PRIVATE_KEY) {
-    throw new Error("TREASURER_PRIVATE_KEY environment variable is required");
-  }
-  
-  const privateKeyArray = JSON.parse(process.env.TREASURER_PRIVATE_KEY);
-  if (!Array.isArray(privateKeyArray) || privateKeyArray.length !== 64) {
-    throw new Error("TREASURER_PRIVATE_KEY must be a 64-element array");
-  }
-  
-  treasurerWallet = Keypair.fromSecretKey(new Uint8Array(privateKeyArray));
-  console.log("✅ Treasury wallet loaded:", treasurerWallet.publicKey.toString());
-} catch (error) {
-  console.error("❌ Treasury wallet setup failed:", error);
+  treasurerWallet = Keypair.fromSecretKey(
+    new Uint8Array(JSON.parse(process.env.TREASURER_PRIVATE_KEY))
+  );
+  console.log("[WALLET] Treasurer wallet initialized successfully:", {
+    publicKey: treasurerWallet.publicKey.toString(),
+    isSigner: true // Assuming valid keypair
+  });
+} catch (err) {
+  console.error("[ERROR] Failed to initialize treasurer wallet:", {
+    error: err.message,
+    stack: err.stack,
+    envKeyFormat: typeof process.env.TREASURER_PRIVATE_KEY
+  });
   process.exit(1);
 }
 
+// Middleware
 app.use(cors());
 app.use(express.json());
+console.log("[SERVER] Middleware initialized");
 
 // === GAME STATE ===
 const challengeStore = {
@@ -87,49 +83,25 @@ const challengeStore = {
   challenges: [],
   playerProgress: {}
 };
+console.log("[GAME] Initialized empty challenge store");
 
 // === HONEYCOMB PROJECT ===
 let honeycombProject;
-
-// Missing function implementation
-async function getExistingProject() {
-  try {
-    console.log("Attempting to fetch existing project...");
-    // This would need the actual project lookup logic based on your Honeycomb setup
-    // For now, return null to force re-creation
-    return null;
-  } catch (error) {
-    console.error("Failed to get existing project:", error);
-    return null;
-  }
-}
-
 async function initializeProject() {
+  console.log("[PROJECT] Starting project initialization...");
+  
   try {
-    console.log("Initializing Honeycomb project...");
-    
-    // Initialize client first
-    if (!honeycombClient) {
-      honeycombClient = initializeHoneycombClient();
-    }
-    
-    // Verify treasury wallet
+    // Verify treasury wallet balance
+    console.log("[BALANCE] Checking treasurer wallet balance...");
     const balance = await connection.getBalance(treasurerWallet.publicKey);
-    console.log("Treasury wallet verification:", {
-      publicKey: treasurerWallet.publicKey.toString(),
-      balance: balance / LAMPORTS_PER_SOL + " SOL"
-    });
+    const balanceSOL = balance / LAMPORTS_PER_SOL;
+    console.log(`[BALANCE] Current balance: ${balanceSOL} SOL`);
     
-    if (balance === 0) {
-      console.warn("⚠️ Treasury wallet has 0 SOL - transactions may fail");
+    if (balanceSOL < 0.1) {
+      throw new Error(`Insufficient funds (${balanceSOL} SOL). Need at least 0.1 SOL for transactions`);
     }
 
-    // Check if Honeycomb client has required methods
-    if (!honeycombClient.createCreateProjectTransaction) {
-      throw new Error("Honeycomb client missing createCreateProjectTransaction method - check API version");
-    }
-
-    // Create project with error handling
+    // Project configuration
     const projectConfig = {
       name: "DailyChallengesGame",
       authority: treasurerWallet.publicKey.toString(),
@@ -139,95 +111,88 @@ async function initializeProject() {
         customDataFields: ["TotalPoints", "LastPlayed"]
       }
     };
+    console.log("[PROJECT] Creating project with config:", JSON.stringify(projectConfig, null, 2));
 
-    console.log("Creating project with config:", projectConfig);
+    // Create transaction
+    console.log("[TX] Creating project transaction...");
+    const { project, tx, error } = await honeycombClient.createCreateProjectTransaction(projectConfig);
     
-    // Create transaction with timeout
-    const createTxPromise = honeycombClient.createCreateProjectTransaction(projectConfig);
-    const timeoutPromise = new Promise((_, reject) => 
-      setTimeout(() => reject(new Error("Transaction creation timeout")), 10000)
-    );
-    
-    const { project, tx } = await Promise.race([createTxPromise, timeoutPromise]);
+    if (error) {
+      console.error("[TX] Transaction creation error details:", error);
+      throw new Error(`Transaction creation failed: ${error.message}`);
+    }
     
     if (!tx) {
-      throw new Error("Transaction creation returned null - check Honeycomb client configuration and network connectivity");
+      throw new Error("Transaction object is undefined");
     }
+    console.log("[TX] Transaction created successfully");
 
-    // Get recent blockhash with retry logic
-    let blockhash, lastValidBlockHeight;
-    let retries = 3;
-    
-    while (retries > 0) {
-      try {
-        const result = await connection.getLatestBlockhash();
-        blockhash = result.blockhash;
-        lastValidBlockHeight = result.lastValidBlockHeight;
-        break;
-      } catch (error) {
-        retries--;
-        if (retries === 0) throw error;
-        console.log(`Retrying blockhash fetch... (${retries} left)`);
-        await new Promise(resolve => setTimeout(resolve, 1000));
-      }
-    }
+    // Prepare transaction
+    console.log("[TX] Getting recent blockhash...");
+    const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
+    console.log(`[TX] Blockhash: ${blockhash}, Valid until: ${lastValidBlockHeight}`);
 
-    // Build and send transaction
     const transaction = new Transaction({
       feePayer: treasurerWallet.publicKey,
       recentBlockhash: blockhash,
     }).add(tx);
+    console.log("[TX] Transaction built successfully");
 
-    console.log("Sending transaction...");
+    // Send transaction
+    console.log("[TX] Sending transaction...");
     const signature = await sendAndConfirmTransaction(
       connection,
       transaction,
       [treasurerWallet],
       { 
-        skipPreflight: false, // Enable preflight for better error info
+        skipPreflight: true,
         commitment: 'confirmed',
-        maxRetries: 3
+        minContextSlot: lastValidBlockHeight - 150 // Add buffer
       }
     );
+    
+    console.log(`[TX] Transaction confirmed: ${signature}`);
+    console.log(`[TX] Explorer URL: https://explorer.solana.com/tx/${signature}?cluster=devnet`);
 
     honeycombProject = project;
-    console.log("✅ Project created successfully!");
-    console.log(`Project ID: ${project.toString()}`);
-    console.log(`Transaction: https://explorer.solana.com/tx/${signature}?cluster=devnet`);
-
+    console.log(`[PROJECT] Project created successfully! ID: ${project.toString()}`);
     return project;
     
   } catch (err) {
-    console.error("❌ Project initialization failed:", {
+    console.error("[ERROR] Project initialization failed:", {
       error: err.message,
-      stack: err.stack?.split('\n').slice(0, 5).join('\n') // Truncate stack trace
+      stack: err.stack,
+      timestamp: new Date().toISOString()
     });
     
-    // Handle specific errors
     if (err.message.includes("Project already exists")) {
-      console.log("Project exists - fetching details...");
-      honeycombProject = await getExistingProject();
-      return honeycombProject;
-    }
-    
-    if (err.message.includes("Transaction creation timeout")) {
-      console.error("Honeycomb API is not responding - check network connectivity");
-    }
-    
-    if (err.message.includes("insufficient funds")) {
-      console.error("Treasury wallet needs more SOL for transaction fees");
+      console.log("[PROJECT] Project exists - attempting to fetch...");
+      try {
+        honeycombProject = await getExistingProject();
+        return honeycombProject;
+      } catch (fetchErr) {
+        console.error("[ERROR] Failed to fetch existing project:", fetchErr);
+        throw fetchErr;
+      }
     }
     
     throw err;
   }
 }
 
+async function getExistingProject() {
+  console.log("[PROJECT] Attempting to fetch existing project...");
+  // Implement your project fetching logic here
+  throw new Error("getExistingProject not implemented");
+}
+
 // === GAME LOGIC ===
 function generateDailyChallenges() {
+  console.log("[GAME] Generating new daily challenges...");
   const verbs = ['Defeat', 'Collect', 'Complete'];
   const targets = ['enemies', 'coins', 'levels'];
   
-  return Array.from({ length: 3 }, (_, i) => ({
+  const challenges = Array.from({ length: 3 }, (_, i) => ({
     id: `daily_${Date.now()}_${i}`,
     verb: verbs[Math.floor(Math.random() * verbs.length)],
     target: targets[Math.floor(Math.random() * targets.length)],
@@ -235,66 +200,67 @@ function generateDailyChallenges() {
     reward: (Math.floor(Math.random() * 5) + 3) * 10,
     badgeIndex: i
   }));
+  
+  console.log("[GAME] Generated challenges:", challenges);
+  return challenges;
 }
 
 // === ROUTES ===
 app.get('/challenges', async (req, res) => {
-  try {
-    const today = new Date().toDateString();
-    
-    if (challengeStore.currentDate !== today) {
-      challengeStore.currentDate = today;
-      challengeStore.challenges = generateDailyChallenges();
-      challengeStore.playerProgress = {};
-    }
-    
-    res.json(challengeStore.challenges);
-  } catch (error) {
-    console.error("Error in /challenges:", error);
-    res.status(500).json({ error: "Failed to generate challenges" });
+  console.log("[API] GET /challenges request received");
+  const today = new Date().toDateString();
+  
+  if (challengeStore.currentDate !== today) {
+    console.log("[GAME] New day detected - resetting challenges");
+    challengeStore.currentDate = today;
+    challengeStore.challenges = generateDailyChallenges();
+    challengeStore.playerProgress = {};
   }
+  
+  res.json(challengeStore.challenges);
 });
 
 app.post('/connect', async (req, res) => {
+  console.log("[API] POST /connect request received:", req.body);
   const { walletAddress } = req.body;
   
   try {
-    if (!walletAddress) {
-      return res.status(400).json({ error: "Wallet address is required" });
-    }
-
+    console.log(`[WALLET] Validating wallet: ${walletAddress}`);
     const pubkey = new PublicKey(walletAddress);
     const accountInfo = await connection.getAccountInfo(pubkey);
     
     if (!accountInfo) {
-      console.log(`Wallet ${walletAddress} not found on chain - may be new`);
+      console.log(`[WALLET] Wallet not found: ${walletAddress}`);
+      throw new Error('Wallet not found');
     }
     
+    console.log(`[WALLET] Wallet validated: ${walletAddress}`);
     res.json({
       wallet: walletAddress,
       challenges: challengeStore.challenges,
       progress: challengeStore.playerProgress[walletAddress] || {}
     });
   } catch (err) {
-    console.error("Error in /connect:", err);
+    console.error("[API] /connect error:", err);
     res.status(400).json({ error: err.message });
   }
 });
 
 app.post('/progress', async (req, res) => {
+  console.log("[API] POST /progress request received:", req.body);
   const { walletAddress, challengeId, progress } = req.body;
   
   try {
-    if (!walletAddress || !challengeId || progress === undefined) {
-      return res.status(400).json({ error: "Missing required fields" });
-    }
-
+    console.log(`[GAME] Updating progress for ${walletAddress} on challenge ${challengeId}`);
     const challenge = challengeStore.challenges.find(c => c.id === challengeId);
+    
     if (!challenge) {
-      return res.status(404).json({ error: 'Challenge not found' });
+      console.log(`[GAME] Challenge not found: ${challengeId}`);
+      throw new Error('Challenge not found');
     }
     
     if (!challengeStore.playerProgress[walletAddress]) {
+      console.log(`[GAME] Initializing progress for new player: ${walletAddress}`);
       challengeStore.playerProgress[walletAddress] = {};
     }
     
@@ -303,75 +269,61 @@ app.post('/progress', async (req, res) => {
       claimed: false
     };
     
-    playerProgress.completed = Math.min(playerProgress.completed + progress, challenge.amount);
-    challengeStore.playerProgress[walletAddress][challengeId] = playerProgress;
+    playerProgress.completed += progress;
+    console.log(`[GAME] Updated progress:`, playerProgress);
     
     if (playerProgress.completed >= challenge.amount && !playerProgress.claimed) {
-      console.log(`Player ${walletAddress} completed challenge ${challengeId}`);
+      console.log(`[GAME] Challenge completed! ${challengeId}`);
       playerProgress.claimed = true;
+      // Add reward logic here
     }
     
     res.json({ progress: playerProgress });
   } catch (err) {
-    console.error("Error in /progress:", err);
-    res.status(500).json({ error: err.message });
+    console.error("[API] /progress error:", err);
+    res.status(400).json({ error: err.message });
   }
 });
 
 // Health check endpoint
-app.get('/health', (req, res) => {
-  res.json({
-    status: 'ok',
-    honeycombProject: honeycombProject?.toString() || 'not initialized',
-    challenges: challengeStore.challenges.length,
-    timestamp: new Date().toISOString()
-  });
+app.get('/health', async (req, res) => {
+  console.log("[API] Health check requested");
+  try {
+    const balance = await connection.getBalance(treasurerWallet.publicKey);
+    const health = {
+      status: 'OK',
+      treasurerBalance: `${balance / LAMPORTS_PER_SOL} SOL`,
+      projectInitialized: !!honeycombProject,
+      lastChallengeReset: challengeStore.currentDate,
+      timestamp: new Date().toISOString()
+    };
+    console.log("[HEALTH] System health:", health);
+    res.json(health);
+  } catch (err) {
+    console.error("[HEALTH] Error:", err);
+    res.status(500).json({ status: 'ERROR', error: err.message });
+  }
 });
 
-// === GRACEFUL STARTUP ===
-async function startServer() {
+// === START SERVER ===
+app.listen(PORT, async () => {
+  console.log(`[SERVER] Starting initialization on port ${PORT}...`);
+  console.log(`[ENV] Current environment:`, {
+    NODE_ENV: process.env.NODE_ENV,
+    SOLANA_RPC: process.env.SOLANA_RPC,
+    HONEYCOMB_API_URL: process.env.HONEYCOMB_API_URL
+  });
+  
   try {
-    console.log("🚀 Starting server initialization...");
-    
-    // Initialize Honeycomb client first
-    initializeHoneycombClient();
-    
-    // Try to initialize project (non-blocking)
-    try {
-      await initializeProject();
-    } catch (error) {
-      console.error("⚠️ Project initialization failed, but server will continue:", error.message);
-      // Server can still run for basic functionality
-    }
-    
-    // Generate initial challenges
+    await initializeProject();
     challengeStore.challenges = generateDailyChallenges();
     
-    // Start server
-    app.listen(PORT, () => {
-      console.log("✅ Server running successfully!");
-      console.log(`🌐 URL: http://localhost:${PORT}`);
-      console.log(`💰 Treasurer: ${treasurerWallet.publicKey.toString()}`);
-      console.log(`🎯 Project: ${honeycombProject?.toString() || 'Not initialized'}`);
-      console.log(`📊 Challenges: ${challengeStore.challenges.length} generated`);
-    });
-    
-  } catch (error) {
-    console.error("❌ Server startup failed:", error);
+    console.log(`[SERVER] Ready!`);
+    console.log(`[INFO] Treasurer: ${treasurerWallet.publicKey.toString()}`);
+    console.log(`[INFO] Project: ${honeycombProject?.toString() || 'Not created'}`);
+    console.log(`[INFO] Explorer: https://explorer.solana.com/address/${treasurerWallet.publicKey.toString()}?cluster=devnet`);
+  } catch (err) {
+    console.error("[FATAL] Failed to initialize server:", err);
     process.exit(1);
   }
-}
-
-// Handle uncaught exceptions
-process.on('uncaughtException', (error) => {
-  console.error('Uncaught Exception:', error);
-  process.exit(1);
 });
-
-process.on('unhandledRejection', (reason, promise) => {
-  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
-  process.exit(1);
-});
-
-// Start the server
-startServer();

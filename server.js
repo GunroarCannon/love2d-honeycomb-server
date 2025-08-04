@@ -61,9 +61,6 @@ const treasurerWallet = Keypair.fromSecretKey(
 app.use(cors());
 app.use(express.json());
 
-console.log("Treasurer balance:", 
-  await connection.getBalance(treasurerWallet.publicKey) / LAMPORTS_PER_SOL
-);
 
 // === GAME STATE ===
 const challengeStore = {

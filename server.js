@@ -38,7 +38,7 @@ console.log(`[NETWORK] Solana RPC connected to: ${connection.rpcEndpoint}`);
 
 console.log("[NETWORK] Initializing Honeycomb client...");
 const SOLANA_RPC = "https://rpc.test.honeycombprotocol.com/";
-const HONEYCOMB_API = "https://edge.main.honeycombprotocol.com/";//https://edge.test.honeycombprotocol.com/";
+const HONEYCOMB_API = "https://edge.test.honeycombprotocol.com/";
 
 
 // Correct Honeycomb client initialization (ONLY the API URL is passed here)
@@ -112,14 +112,15 @@ async function initializeProject() {
 
     // Project configuration
     const projectConfig = {
-      name: "DailyChallengesGame",
-      authority: treasurerWallet.publicKey.toString(),
-      payer: treasurerWallet.publicKey.toString(),
-      profileDataConfig: {
-        achievements: ["DailyWinner", "WeekStreak"],
-        customDataFields: ["TotalPoints", "LastPlayed"]
-      }
-    };
+  name: "TestProject_" + Date.now(), // make it unique
+  authority: treasurerWallet.publicKey.toBase58(),
+  payer: treasurerWallet.publicKey.toBase58(),
+  profileDataConfig: {
+    achievements: [],
+    customDataFields: []
+  }
+};
+
     console.log("[PROJECT] Creating project with config:", JSON.stringify(projectConfig, null, 2));
 
     // Create transaction

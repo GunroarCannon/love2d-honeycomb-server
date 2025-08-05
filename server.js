@@ -22,8 +22,8 @@ console.log(`[CONFIG] Server port set to: ${PORT}`);
 
 // Network configuration
 const HONEYCOMB_NETWORKS = {
-  mainnet: 'https://rpc.main.honeycombprotocol.com',
-  testnet: 'https://rpc.test.honeycombprotocol.com',
+  mainnet: 'https://edge.main.honeycombprotocol.com',
+  testnet: 'https://edge.test.honeycombprotocol.com',
   solanaDevnet: 'https://api.devnet.solana.com'
 };
 console.log("[CONFIG] Network endpoints configured");
@@ -37,13 +37,14 @@ const connection = new Connection(
 console.log(`[NETWORK] Solana RPC connected to: ${connection.rpcEndpoint}`);
 
 console.log("[NETWORK] Initializing Honeycomb client...");
-const honeycombClient = createEdgeClient({
+const honeycombClient = createEdgeClient(HONEYCOMB_NETWORKS.testnet, true)
+/*{
   apiUrl: process.env.HONEYCOMB_API_URL || 'https://edge.main.honeycombprotocol.com/',
   connection: connection,
   network: 'testnet',
   debug: true
 });
-
+*/
 // Verify client initialization
 console.log("[DEBUG] Honeycomb client verification:", {
   apiUrl: honeycombClient.apiUrl,

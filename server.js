@@ -20,6 +20,13 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json());
 
+// Initialize challenge store
+const challengeStore = {
+  currentDate: new Date().toDateString(),
+  challenges: [],
+  playerProgress: {}
+};
+
 // Initialize Solana connection
 const connection = new Connection(
   process.env.SOLANA_RPC || 'https://rpc.test.honeycombprotocol.com',

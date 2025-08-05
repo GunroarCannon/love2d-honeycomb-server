@@ -38,7 +38,7 @@ console.log(`[NETWORK] Solana RPC connected to: ${connection.rpcEndpoint}`);
 
 console.log("[NETWORK] Initializing Honeycomb client...");
 const SOLANA_RPC = "https://rpc.test.honeycombprotocol.com/";
-const HONEYCOMB_API = "https://edge.test.honeycombprotocol.com/";
+const HONEYCOMB_API = "https://edge.main.honeycombprotocol.com/";//https://edge.test.honeycombprotocol.com/";
 
 
 // Correct Honeycomb client initialization (ONLY the API URL is passed here)

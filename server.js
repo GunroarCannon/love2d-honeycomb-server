@@ -31,7 +31,7 @@ console.log("[CONFIG] Network endpoints configured");
 // Initialize connections with debug logs
 console.log("[NETWORK] Initializing Solana connection...");
 const connection = new Connection(
-  process.env.SOLANA_RPC || HONEYCOMB_NETWORKS.testnet,
+  'https://rpc.test.honeycombprotocol.com', // process.env.SOLANA_RPC || HONEYCOMB_NETWORKS.testnet,
   'confirmed'
 );
 console.log(`[NETWORK] Solana RPC connected to: ${connection.rpcEndpoint}`);

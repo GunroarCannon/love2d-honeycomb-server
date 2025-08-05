@@ -1,201 +1,94 @@
 // === ENV + SETUP ===
 require('dotenv').config();
-console.log("[INIT] Environment variables loaded");
+console.log("[INIT] .env loaded");
 
+// Dependencies
 const express = require('express');
 const cors = require('cors');
 const { createEdgeClient } = require('@honeycomb-protocol/edge-client');
 const {
-  Connection,
-  Keypair,
-  PublicKey,
-  Transaction,
-  sendAndConfirmTransaction,
+  Connection, Keypair, PublicKey,
+  Transaction, sendAndConfirmTransaction,
   LAMPORTS_PER_SOL
 } = require('@solana/web3.js');
 
-console.log("[INIT] Dependencies loaded");
+console.log("[INIT] Loaded dependencies", { edgeClient: !!createEdgeClient });
 
+// App setup
 const app = express();
 const PORT = process.env.PORT || 3000;
-console.log(`[CONFIG] Server port set to: ${PORT}`);
+app.use(cors());
+app.use(express.json());
 
-// Network configuration
-const HONEYCOMB_NETWORKS = {
-  mainnet: 'https://edge.main.honeycombprotocol.com',
-  testnet: 'https://edge.test.honeycombprotocol.com',
-  solanaDevnet: 'https://api.devnet.solana.com'
-};
-console.log("[CONFIG] Network endpoints configured");
-
-// Initialize connections with debug logs
-console.log("[NETWORK] Initializing Solana connection...");
+// Initialize Solana connection
 const connection = new Connection(
-  'https://rpc.test.honeycombprotocol.com', // process.env.SOLANA_RPC || HONEYCOMB_NETWORKS.testnet,
+  process.env.SOLANA_RPC || 'https://rpc.test.honeycombprotocol.com',
   'confirmed'
 );
-console.log(`[NETWORK] Solana RPC connected to: ${connection.rpcEndpoint}`);
+console.log(`[NETWORK] Connected to Solana RPC: ${connection.rpcEndpoint}`);
 
-console.log("[NETWORK] Initializing Honeycomb client...");
-const SOLANA_RPC = "https://rpc.test.honeycombprotocol.com/";
-const HONEYCOMB_API = "https://edge.test.honeycombprotocol.com/";
-
-
-// Correct Honeycomb client initialization (ONLY the API URL is passed here)
-const honeycombClient = createEdgeClient(HONEYCOMB_API, true);
-
-// Log details
-
-/*{
-  apiUrl: process.env.HONEYCOMB_API_URL || 'https://edge.main.honeycombprotocol.com/',
-  connection: connection,
-  network: 'testnet',
-  debug: true
-});
-*/
-// Verify client initialization
-console.log("[DEBUG] Honeycomb client verification:", {
+// Initialize Honeycomb client with debug
+const honeycombClient = createEdgeClient(
+  process.env.HONEYCOMB_API_URL || 'https://edge.test.honeycombprotocol.com',
+  true
+);
+console.log("[HONEYCOMB] Client initialized:", {
   apiUrl: honeycombClient.apiUrl,
-  network: honeycombClient.network,
-  connectionValid: !!honeycombClient.connection,
-  connectionEndpoint: honeycombClient.connection?.rpcEndpoint
+  network: honeycombClient.network
 });
 
-// Treasury wallet setup with validation
-console.log("[WALLET] Initializing treasurer wallet...");
+// Treasurer wallet
 let treasurerWallet;
 try {
   treasurerWallet = Keypair.fromSecretKey(
     new Uint8Array(JSON.parse(process.env.TREASURER_PRIVATE_KEY))
   );
-  console.log("[WALLET] Treasurer wallet initialized successfully:", {
-    publicKey: treasurerWallet.publicKey.toString(),
-    isSigner: true // Assuming valid keypair
-  });
+  console.log("[WALLET] Treasurer initialized:", treasurerWallet.publicKey.toBase58());
 } catch (err) {
-  console.error("[ERROR] Failed to initialize treasurer wallet:", {
-    error: err.message,
-    stack: err.stack,
-    envKeyFormat: typeof process.env.TREASURER_PRIVATE_KEY
-  });
+  console.error("[WALLET] Invalid private key:", err);
   process.exit(1);
 }
 
-// Middleware
-app.use(cors());
-app.use(express.json());
-console.log("[SERVER] Middleware initialized");
+// === Helper: Strict check ===
+function assertTx(result, label = '') {
+  if (!result || !result.tx) {
+    console.error(`[ASSERT] Missing tx in result${label || ''}`, result);
+    throw new Error(`Missing tx in Honeycomb response${label}`);
+  }
+  return result;
+}
 
-// === GAME STATE ===
-const challengeStore = {
-  currentDate: '',
-  challenges: [],
-  playerProgress: {}
-};
-console.log("[GAME] Initialized empty challenge store");
-
-// === HONEYCOMB PROJECT ===
+// === Initialize Project ===
 let honeycombProject;
 async function initializeProject() {
-  console.log("[PROJECT] Starting project initialization...");
-  
-  try {
-    // Verify treasury wallet balance
-    console.log("[BALANCE] Checking treasurer wallet balance...");
-    const balance = await connection.getBalance(treasurerWallet.publicKey);
-    const balanceSOL = balance / LAMPORTS_PER_SOL;
-    console.log(`[BALANCE] Current balance: ${balanceSOL} SOL`);
-    
-    if (balanceSOL < 0.1) {
-      throw new Error(`Insufficient funds (${balanceSOL} SOL). Need at least 0.1 SOL for transactions`);
-    }
-
-    // Project configuration
-    const projectConfig = {
-  name: "TestProject_" + Date.now(), // make it unique
-  authority: treasurerWallet.publicKey.toBase58(),
-  payer: treasurerWallet.publicKey.toBase58(),
-  profileDataConfig: {
-    achievements: [],
-    customDataFields: []
+  console.log("[PROJECT] Starting initialization...");
+  const balance = await connection.getBalance(treasurerWallet.publicKey);
+  console.log(`[PROJECT] Treasurer balance: ${balance / LAMPORTS_PER_SOL} SOL`);
+  if (balance < 0.05 * LAMPORTS_PER_SOL) {
+    throw new Error("Treasurer wallet has insufficient SOL");
   }
-};
 
-    console.log("[PROJECT] Creating project with config:", JSON.stringify(projectConfig, null, 2));
+  const projectConfig = {
+    name: `DailyGame_${Date.now()}`,
+    authority: treasurerWallet.publicKey.toBase58(),
+    payer: treasurerWallet.publicKey.toBase58(),
+    profileDataConfig: { achievements: [], customDataFields: [] }
+  };
+  console.log("[PROJECT] Config:", projectConfig);
 
-    // Create transaction
-    console.log("[TX] Creating project transaction...");
-    //const { project, tx, error } = await honeycombClient.createCreateProjectTransaction(projectConfig);
-    const result = await honeycombClient.createCreateProjectTransaction(projectConfig);
+  const result = await honeycombClient.createCreateProjectTransaction(projectConfig);
+  assertTx(result);
+  const { project, tx } = result;
+  console.log("[TX] Prepared:", { projectAddress: project.toString() });
 
-    if (!result || result.error || !result.tx) {
-      console.error("[ERROR] Project creation failed:", result?.error ?? "Unknown error");
-      return;
-    }
-    const error=null;
-    const { project, tx } = result;
-  
-    if (error) {
-      console.error("[TX] Transaction creation error details:", error);
-      throw new Error(`Transaction creation failed: ${error.message}`);
-    }
-    
-    if (!tx) {
-      throw new Error("Transaction object is undefined");
-    }
-    console.log("[TX] Transaction created successfully");
+  const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
+  const solTx = new Transaction({ feePayer: treasurerWallet.publicKey, recentBlockhash: blockhash });
+  solTx.add(tx);
 
-    // Prepare transaction
-    console.log("[TX] Getting recent blockhash...");
-    const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
-    console.log(`[TX] Blockhash: ${blockhash}, Valid until: ${lastValidBlockHeight}`);
-
-    const transaction = new Transaction({
-      feePayer: treasurerWallet.publicKey,
-      recentBlockhash: blockhash,
-    }).add(tx);
-    console.log("[TX] Transaction built successfully");
-
-    // Send transaction
-    console.log("[TX] Sending transaction...");
-    const signature = await sendAndConfirmTransaction(
-      connection,
-      transaction,
-      [treasurerWallet],
-      { 
-        skipPreflight: true,
-        commitment: 'confirmed',
-        minContextSlot: lastValidBlockHeight - 150 // Add buffer
-      }
-    );
-    
-    console.log(`[TX] Transaction confirmed: ${signature}`);
-    console.log(`[TX] Explorer URL: https://explorer.solana.com/tx/${signature}?cluster=devnet`);
-
-    honeycombProject = project;
-    console.log(`[PROJECT] Project created successfully! ID: ${project.toString()}`);
-    return project;
-    
-  } catch (err) {
-    console.error("[ERROR] Project initialization failed:", {
-      error: err.message,
-      stack: err.stack,
-      timestamp: new Date().toISOString()
-    });
-    
-    if (err.message.includes("Project already exists")) {
-      console.log("[PROJECT] Project exists - attempting to fetch...");
-      try {
-        honeycombProject = await getExistingProject();
-        return honeycombProject;
-      } catch (fetchErr) {
-        console.error("[ERROR] Failed to fetch existing project:", fetchErr);
-        throw fetchErr;
-      }
-    }
-    
-    throw err;
-  }
+  const signature = await sendAndConfirmTransaction(connection, solTx, [treasurerWallet]);
+  console.log("[TX] Confirmed:", signature);
+  honeycombProject = project;
+  return project;
 }
 
 async function getExistingProject() {

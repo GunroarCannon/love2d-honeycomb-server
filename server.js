@@ -37,7 +37,10 @@ const connection = new Connection(
 console.log(`[NETWORK] Solana RPC connected to: ${connection.rpcEndpoint}`);
 
 console.log("[NETWORK] Initializing Honeycomb client...");
-const honeycombClient = createEdgeClient(HONEYCOMB_NETWORKS.testnet, true)
+
+const EDGE_URL = process.env.HONEYCOMB_API_URL || HONEYCOMB_NETWORKS.testnet;
+const honeycombClient = createEdgeClient(EDGE_URL, true);
+
 /*{
   apiUrl: process.env.HONEYCOMB_API_URL || 'https://edge.main.honeycombprotocol.com/',
   connection: connection,

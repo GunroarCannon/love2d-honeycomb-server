@@ -124,8 +124,16 @@ async function initializeProject() {
 
     // Create transaction
     console.log("[TX] Creating project transaction...");
-    const { project, tx, error } = await honeycombClient.createCreateProjectTransaction(projectConfig);
-    
+    //const { project, tx, error } = await honeycombClient.createCreateProjectTransaction(projectConfig);
+    const result = await honeycombClient.createCreateProjectTransaction(projectConfig);
+
+    if (!result || result.error || !result.tx) {
+      console.error("[ERROR] Project creation failed:", result?.error ?? "Unknown error");
+      return;
+    }
+    const error=null;
+    const { project, tx } = result;
+  
     if (error) {
       console.error("[TX] Transaction creation error details:", error);
       throw new Error(`Transaction creation failed: ${error.message}`);

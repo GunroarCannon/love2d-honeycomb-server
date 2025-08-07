@@ -200,7 +200,7 @@ app.post('/link-wallet', async (req, res) => {
 
 // Endpoint for Love2D to check session
 app.get('/check-session', (req, res) => {
-  const session = activeSessions.get(req.query.token);
+  const session = challengeStore.sessions[sessionToken];// activeSessions.get(req.query.token);
   res.json(session || { error: "Not linked" });
 });
 

@@ -199,8 +199,11 @@ app.post('/link-wallet', async (req, res) => {
 });
 
 // Endpoint for Love2D to check session
-app.get('/check-session', (req, res) => {
-  const session = challengeStore.sessions[sessionToken];// activeSessions.get(req.query.token);
+app.get('/check-session', (req, res) => 
+  console.log('[SESSION] Checking session for token:', req.query.token);
+  console.log('[SESSION] Current sessions:', challengeStore.sessions);
+  const session = challengeStore.sessions?[req.query.token];// activeSessions.get(req.query.token);
+  console.log("session found!", session);
   res.json(session || { error: "Not linked" });
 });
 

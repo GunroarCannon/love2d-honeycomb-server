@@ -199,7 +199,7 @@ app.post('/link-wallet', async (req, res) => {
 });
 
 // Endpoint for Love2D to check session
-app.get('/check-session', (req, res) => 
+app.get('/check-session', (req, res) => {
   console.log('[SESSION] Checking session for token:', req.query.token);
   console.log('[SESSION] Current sessions:', challengeStore.sessions);
   const session = challengeStore.sessions?[req.query.token];// activeSessions.get(req.query.token);

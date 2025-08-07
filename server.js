@@ -202,7 +202,7 @@ app.post('/link-wallet', async (req, res) => {
 app.get('/check-session', (req, res) => {
   console.log('[SESSION] Checking session for token:', req.query.token);
   console.log('[SESSION] Current sessions:', challengeStore.sessions);
-  const session = challengeStore.sessions?[req.query.token];// activeSessions.get(req.query.token);
+  const session = challengeStore.sessions?.[req.query.token];// activeSessions.get(req.query.token);
   console.log("session found!", session);
   res.json(session || { error: "Not linked" });
 });

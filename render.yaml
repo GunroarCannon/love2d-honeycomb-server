@@ -15,4 +15,6 @@ services:
         value: https://edge.main.honeycombprotocol.com/
       - key: TREASURER_PRIVATE_KEY
         fromDatabase: false
+      - key: PROJECT_PUBKEY
+        value: AgZGQHqttemy1qhEwxqcPGX56mjdjB1uUKnDKhS8m5uS
         

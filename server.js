@@ -144,39 +144,46 @@ async function getExistingProject(projectKey) {
   console.log("[PROJECT] Attempting to fetch existing project...");
   
   try {
-    // Option 1: Verify project account exists
+    // First check if we have a project key
     if (projectKey) {
+      console.log(`[PROJECT] Checking project: ${projectKey}`);
+      
+      // 1. Verify on-chain existence
       const projectPubkey = new PublicKey(projectKey);
       const accountInfo = await connection.getAccountInfo(projectPubkey);
       
-      if (accountInfo) {
-        console.log(`[PROJECT] Found existing project: ${projectKey}`);
-        return projectPubkey;
+      if (!accountInfo) {
+        throw new Error("Project account not found on-chain");
       }
-      throw new Error("Project account not found");
+
+      // 2. Verify in Honeycomb index
+      const { project: foundProjects } = await honeycombClient.findProjects({
+        addresses: [projectKey]
+      });
+
+      if (!foundProjects || foundProjects.length === 0) {
+        throw new Error("Project not found in Honeycomb index");
+      }
+
+      console.log(`[PROJECT] Verified existing project: ${projectKey}`);
+      return projectPubkey;
     }
 
-    // Option 2: Alternative lookup by authority (treasurer wallet)
-    // Note: This would require knowing the project was created with this authority
-    const projectAccounts = await connection.getProgramAccounts(
-      new PublicKey("HoneycombProgramId"), // Replace with actual program ID
-      {
-        filters: [
-          { dataSize: 165 }, // Standard project account size
-          { 
-            memcmp: {
-              offset: 8, // Authority offset
-              bytes: treasurerWallet.publicKey.toBase58()
-            }
-          }
-        ]
-      }
-    );
+    // Fallback: Search by authority if no projectKey provided
+    console.log("[PROJECT] Searching projects by authority...");
+    const { project: authorityProjects } = await honeycombClient.findProjects({
+      authorities: [treasurerWallet.publicKey.toString()]
+    });
 
-    if (projectAccounts.length > 0) {
-      const projectAddress = projectAccounts[0].pubkey;
-      console.log(`[PROJECT] Found project by authority: ${projectAddress}`);
-      return projectAddress;
+    if (authorityProjects && authorityProjects.length > 0) {
+      // Sort by newest first (assuming createdAt is available)
+      const sortedProjects = authorityProjects.sort((a, b) => 
+        new Date(b.createdAt) - new Date(a.createdAt)
+      );
+      
+      const newestProject = sortedProjects[0];
+      console.log(`[PROJECT] Found project by authority: ${newestProject.address}`);
+      return new PublicKey(newestProject.address);
     }
 
     throw new Error("No existing projects found");

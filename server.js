@@ -188,17 +188,47 @@ app.post('/connect', async (req, res) => {
   }
 });
 
-app.post('/progress', async (req, res) => {
-  console.log("[API] POST /progress request received:", req.body);
-  const { walletAddress, challengeId, progress } = req.body;
+// Add this near your other route handlers
+app.post('/verify-session', async (req, res) => {
+  console.log("[API] POST /verify-session request received:", req.body);
+  const { sessionToken, walletAddress, signature } = req.body;
   
   try {
-    console.log(`[GAME] Updating progress for ${walletAddress} on challenge ${challengeId}`);
-    const challenge = challengeStore.challenges.find(c => c.id === challengeId);
+    // Verify the signature (pseudo-code - implement your actual verification)
+    const message = `Verify wallet for game session: ${sessionToken}`;
+    const verified = true; // Replace with actual signature verification
     
-    if (!challenge) {
-      console.log(`[GAME] Challenge not found: ${challengeId}`);
-      throw new Error('Challenge not found');
+    if (verified) {
+      console.log(`[SESSION] Verified wallet ${walletAddress} for session ${sessionToken}`);
+      
+      // Store the session (in-memory for now - use Redis in production)
+      if (!challengeStore.sessions) challengeStore.sessions = {};
+      challengeStore.sessions[sessionToken] = {
+        walletAddress,
+        verifiedAt: new Date().toISOString()
+      };
+      
+      return res.json({ verified: true });
+    }
+    
+    throw new Error('Invalid signature');
+  } catch (err) {
+    console.error("[API] /verify-session error:", err);
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/progress', async (req, res) => { 
+  console.log("[API] POST /progress request received:", req.body);
+  const { walletAddress, challengeId, progress, sessionToken } = req.body;
+  
+  try {
+    // Session verification
+    if (sessionToken) {
+      const session = challengeStore.sessions?.[sessionToken];
+      if (!session || session.walletAddress !== walletAddress) {
+        throw new Error('Invalid session');
+      }
     }
     
     if (!challengeStore.playerProgress[walletAddress]) {

@@ -12,6 +12,24 @@ const {
   LAMPORTS_PER_SOL
 } = require('@solana/web3.js');
 
+// Add this to your routes
+function verifySignature(message, signature, publicKey) {
+  try {
+    // Convert string signature back to Uint8Array
+    const signatureArray = new Uint8Array(signature.split(',').map(Number));
+    
+    // Reconstruct the signed message
+    const tx = Transaction.populate(Message.from(Buffer.from(message)));
+    tx.addSignature(new PublicKey(publicKey), signatureArray);
+    
+    return tx.verifySignatures();
+  } catch (err) {
+    console.error("Signature verification failed:", err);
+    return false;
+  }
+}
+
+
 console.log("[INIT] Loaded dependencies", { edgeClient: !!createEdgeClient });
 
 // App setup
@@ -161,6 +179,31 @@ app.get('/challenges', async (req, res) => {
   
   res.json(challengeStore.challenges);
 });
+
+// Temp session store (use Redis in production)
+const activeSessions = new Map();
+
+// Endpoint for React to register wallet
+app.post('/link-wallet', async (req, res) => {
+  const { sessionToken, walletAddress, signature } = req.body;
+  
+  // Verify wallet signature here (security critical!)
+  const isValid = await verifySignature(walletAddress, signature);
+  
+  if (isValid) {
+    activeSessions.set(sessionToken, { walletAddress });
+    res.json({ success: true });
+  } else {
+    res.status(401).json({ error: "Invalid signature" });
+  }
+});
+
+// Endpoint for Love2D to check session
+app.get('/check-session', (req, res) => {
+  const session = activeSessions.get(req.query.token);
+  res.json(session || { error: "Not linked" });
+});
+
 
 app.post('/connect', async (req, res) => {
   console.log("[API] POST /connect request received:", req.body);

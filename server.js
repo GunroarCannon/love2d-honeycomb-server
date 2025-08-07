@@ -602,7 +602,7 @@ app.listen(PORT, async () => {
   });
   
   try {
-    honeycombProject = await initializeProject();
+    honeycombProject = await ensureProjectInitialized();
     challengeStore.challenges = generateDailyChallenges();
     
     console.log(`[SERVER] Ready!`);

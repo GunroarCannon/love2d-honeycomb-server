@@ -592,6 +592,14 @@ app.get('/health', async (req, res) => {
   }
 });
 
+process.on('uncaughtException', (err) => {
+  console.error('Uncaught Exception:', err);
+});
+
+process.on('unhandledRejection', (err) => {
+  console.error('Unhandled Rejection:', err);
+});
+
 // === START SERVER ===
 app.listen(PORT, async () => {
   console.log(`[SERVER] Starting initialization on port ${PORT}...`);

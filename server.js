@@ -140,10 +140,51 @@ async function initializeProject() {
   }
 }
 
-async function getExistingProject() {
+async function getExistingProject(projectKey) {
   console.log("[PROJECT] Attempting to fetch existing project...");
-  // Implement your project fetching logic here
-  throw new Error("getExistingProject not implemented");
+  
+  try {
+    // Option 1: Verify project account exists
+    if (projectKey) {
+      const projectPubkey = new PublicKey(projectKey);
+      const accountInfo = await connection.getAccountInfo(projectPubkey);
+      
+      if (accountInfo) {
+        console.log(`[PROJECT] Found existing project: ${projectKey}`);
+        return projectPubkey;
+      }
+      throw new Error("Project account not found");
+    }
+
+    // Option 2: Alternative lookup by authority (treasurer wallet)
+    // Note: This would require knowing the project was created with this authority
+    const projectAccounts = await connection.getProgramAccounts(
+      new PublicKey("HoneycombProgramId"), // Replace with actual program ID
+      {
+        filters: [
+          { dataSize: 165 }, // Standard project account size
+          { 
+            memcmp: {
+              offset: 8, // Authority offset
+              bytes: treasurerWallet.publicKey.toBase58()
+            }
+          }
+        ]
+      }
+    );
+
+    if (projectAccounts.length > 0) {
+      const projectAddress = projectAccounts[0].pubkey;
+      console.log(`[PROJECT] Found project by authority: ${projectAddress}`);
+      return projectAddress;
+    }
+
+    throw new Error("No existing projects found");
+    
+  } catch (err) {
+    console.error("[PROJECT] Fetch error:", err);
+    throw err;
+  }
 }
 
 // === GAME LOGIC ===
@@ -264,8 +305,191 @@ app.post('/verify-session', async (req, res) => {
   }
 });
 
-app.post('/progress', async (req, res) => { 
-  console.log("[API] POST /progress request received:", req.body);
+// === Honeycomb-Specific Routes ===
+
+// Authentication Endpoint
+app.post('/auth', async (req, res) => {
+  const { wallet, project } = req.body;
+  
+  try {
+    // Verify wallet owns project
+    const { accessToken } = await honeycombClient.createAccessToken({
+      wallet,
+      project
+    });
+    
+    res.json({ 
+      access_token: accessToken,
+      expires_in: 3600 // 1 hour
+    });
+  } catch (err) {
+    console.error("[AUTH] Error:", err);
+    res.status(401).json({ error: "Authentication failed" });
+  }
+});
+
+// User Creation
+app.post('/users', async (req, res) => {
+  const { wallet, info, payer } = req.body;
+  
+  try {
+    const { tx } = await honeycombClient.createNewUserTransaction({
+      wallet,
+      info: info || {},
+      payer: payer || wallet
+    });
+    
+    res.json({
+      transaction: tx,
+      status: "pending"
+    });
+  } catch (err) {
+    console.error("[USER] Creation failed:", err);
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// Profile Management
+app.post('/profiles', async (req, res) => {
+  const { project, identity, info, payer } = req.body;
+  const authHeader = req.headers.authorization;
+
+  try {
+    if (!authHeader) throw new Error("Authorization required");
+    
+    const { tx } = await honeycombClient.createNewProfileTransaction({
+      project,
+      identity: identity || "main",
+      info: info || {},
+      payer: payer || project
+    }, {
+      headers: { authorization: authHeader }
+    });
+    
+    res.json({
+      transaction: tx,
+      status: "pending"
+    });
+  } catch (err) {
+    console.error("[PROFILE] Creation failed:", err);
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// XP and Achievements
+app.post('/xp', async (req, res) => {
+  const { wallet, project, amount } = req.body;
+  
+  try {
+    const profile = await honeycombClient.findProfiles({
+      wallets: [wallet],
+      projects: [project]
+    }).then(({ profile }) => profile[0]);
+
+    if (!profile) throw new Error("Profile not found");
+
+    const { tx } = await honeycombClient.createUpdatePlatformDataTransaction({
+      profile: profile.address,
+      platformData: { addXp: parseInt(amount) || 0 },
+      authority: treasurerWallet.publicKey.toString()
+    });
+
+    res.json({
+      transaction: tx,
+      xp_added: amount
+    });
+  } catch (err) {
+    console.error("[XP] Error:", err);
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/achievements', async (req, res) => {
+  const { wallet, project, achievement } = req.body;
+  
+  try {
+    const profile = await honeycombClient.findProfiles({
+      wallets: [wallet],
+      projects: [project]
+    }).then(({ profile }) => profile[0]);
+
+    if (!profile) throw new Error("Profile not found");
+
+    const { tx } = await honeycombClient.createUpdatePlatformDataTransaction({
+      profile: profile.address,
+      platformData: { 
+        addAchievements: [achievement] 
+      },
+      authority: treasurerWallet.publicKey.toString()
+    });
+
+    res.json({
+      transaction: tx,
+      achievement_unlocked: achievement
+    });
+  } catch (err) {
+    console.error("[ACHIEVEMENT] Error:", err);
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// Custom Data Storage
+app.post('/data', async (req, res) => {
+  const { wallet, project, key, value, metadata } = req.body;
+  
+  try {
+    const profile = await honeycombClient.findProfiles({
+      wallets: [wallet],
+      projects: [project]
+    }).then(({ profile }) => profile[0]);
+
+    if (!profile) throw new Error("Profile not found");
+
+    const { tx } = await honeycombClient.createUpdateProfileTransaction({
+      profile: profile.address,
+      customData: {
+        add: [[key, JSON.stringify(value)]]
+      },
+      payer: treasurerWallet.publicKey.toString()
+    });
+
+    res.json({
+      transaction: tx,
+      data_stored: { [key]: value }
+    });
+  } catch (err) {
+    console.error("[DATA] Storage failed:", err);
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.get('/data/:key', async (req, res) => {
+  const { wallet, project } = req.query;
+  const { key } = req.params;
+  
+  try {
+    const profile = await honeycombClient.findProfiles({
+      wallets: [wallet],
+      projects: [project]
+    }).then(({ profile }) => profile[0]);
+
+    if (!profile) throw new Error("Profile not found");
+
+    const value = profile.customData?.find(item => item.key === key)?.value;
+    
+    res.json({
+      key,
+      value: value ? JSON.parse(value) : null
+    });
+  } catch (err) {
+    console.error("[DATA] Retrieval failed:", err);
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// === Enhanced Existing Routes ===
+
+app.post('/progress', async (req, res) => {
   const { walletAddress, challengeId, progress, sessionToken } = req.body;
   
   try {
@@ -277,8 +501,8 @@ app.post('/progress', async (req, res) => {
       }
     }
     
+    // Local progress tracking
     if (!challengeStore.playerProgress[walletAddress]) {
-      console.log(`[GAME] Initializing progress for new player: ${walletAddress}`);
       challengeStore.playerProgress[walletAddress] = {};
     }
     
@@ -288,20 +512,65 @@ app.post('/progress', async (req, res) => {
     };
     
     playerProgress.completed += progress;
-    console.log(`[GAME] Updated progress:`, playerProgress);
     
-    if (playerProgress.completed >= challenge.amount && !playerProgress.claimed) {
-      console.log(`[GAME] Challenge completed! ${challengeId}`);
-      playerProgress.claimed = true;
-      // Add reward logic here
+    // On-chain XP reward
+    if (honeycombProject) {
+      await honeycombClient.createUpdatePlatformDataTransaction({
+        profile: await getProfileAddress(walletAddress),
+        platformData: { addXp: Math.floor(progress * 10) }, // 10 XP per progress point
+        authority: treasurerWallet.publicKey.toString()
+      });
     }
     
     res.json({ progress: playerProgress });
   } catch (err) {
-    console.error("[API] /progress error:", err);
+    console.error("[PROGRESS] Error:", err);
     res.status(400).json({ error: err.message });
   }
 });
+
+// === Helper Functions ===
+// Add to top with other stores
+const profileCache = new Map();
+
+// Modify getProfileAddress
+async function getProfileAddress(wallet) {
+  if (profileCache.has(wallet)) {
+    return profileCache.get(wallet);
+  }
+  
+  const { profile } = await honeycombClient.findProfiles({
+    wallets: [wallet],
+    projects: [honeycombProject]
+  });
+  
+  if (profile[0]) {
+    profileCache.set(wallet, profile[0].address);
+  }
+  
+  return profile[0]?.address;
+}
+
+async function ensureProjectInitialized() {
+  if (!honeycombProject) {
+    try {
+      honeycombProject = await getExistingProject(process.env.PROJECT_PUBKEY);
+    } catch {
+      console.log("No existing project found, creating new one");
+      honeycombProject = await initializeProject();
+      
+      // Create profiles tree after project init
+      await honeycombClient.createCreateProfilesTreeTransaction({
+        payer: treasurerWallet.publicKey.toString(),
+        project: honeycombProject.toString(),
+        treeConfig: {
+          basic: { numAssets: 100000 }
+        }
+      });
+    }
+  }
+  return honeycombProject;
+}
 
 // Health check endpoint
 app.get('/health', async (req, res) => {

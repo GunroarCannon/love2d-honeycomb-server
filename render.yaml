@@ -10,11 +10,14 @@ services:
       - key: PORT
         value: 10000
       - key: SOLANA_RPC
-        value: https://api.devnet.solana.com
+        value: https://rpc.test.honeycombprotocol.com/
       - key: HONEYCOMB_API_URL
-        value: https://edge.main.honeycombprotocol.com/
-      - key: TREASURER_PRIVATE_KEY
-        fromDatabase: false
+        value: https://edge.test.honeycombprotocol.com/
+      - key: OLD_TREASURER_PRIVATE_KEY
+        value: ""
+      - key: HONEYCOMB_PROJECT_ID
+        value: "[your_project_id]"
+      - key: TREASURER_PUBLIC_KEY
+        value: Ea11c8R536WGzMje5pDz8sUkYqyu3mo8txyXhYHmDfj7
       - key: PROJECT_PUBKEY
-        value: AgZGQHqttemy1qhEwxqcPGX56mjdjB1uUKnDKhS8m5uS
-        
+        value: BkF2wCJirExrRYva4YcHMHqdnrZJENWbZkN1o84ZQHa8
